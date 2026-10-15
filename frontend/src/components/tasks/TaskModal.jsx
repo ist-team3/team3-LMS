@@ -25,14 +25,17 @@ export default function TaskModal({
     if (initialTask) {
       setTitle(initialTask.title || '');
       setDescription(initialTask.description || '');
-      setAssignedTo(initialTask.assigned_to || members[0]?.user_id || '');
+      const defaultAssignee = initialTask.assigned_to !== undefined && initialTask.assigned_to !== null
+        ? String(initialTask.assigned_to)
+        : (members[0]?.user_id ? String(members[0].user_id) : '');
+      setAssignedTo(defaultAssignee);
       setPriority(initialTask.priority || 'medium');
       setAssignedDate(initialTask.assigned_date || new Date().toISOString().split('T')[0]);
       setDueDate(initialTask.due_date || '');
     } else {
       setTitle('');
       setDescription('');
-      setAssignedTo(members[0]?.user_id || '');
+      setAssignedTo(members[0]?.user_id ? String(members[0].user_id) : '');
       setPriority('medium');
       setAssignedDate(new Date().toISOString().split('T')[0]);
       setDueDate('');
@@ -92,18 +95,23 @@ export default function TaskModal({
           <select
             id="task-assigned"
             className="input"
-            value={assignedTo}
+            value={assignedTo !== undefined && assignedTo !== null ? String(assignedTo) : ''}
             onChange={(e) => setAssignedTo(e.target.value)}
             disabled={!isLeader && isEditing}
             required
           >
-            <option value="">Select a member...</option>
+            <option value="">{members.length === 0 ? 'No squad members found...' : 'Select a member...'}</option>
             {members.map((m) => (
-              <option key={m.user_id} value={m.user_id}>
-                {m.name} ({m.role})
+              <option key={m.user_id} value={String(m.user_id)}>
+                {m.name} ({m.role || 'member'})
               </option>
             ))}
           </select>
+          {members.length === 1 && (
+            <p style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', marginTop: '5px' }}>
+              Only 1 member in this squad right now. You can assign to this member or invite teammates from the Squads page.
+            </p>
+          )}
         </div>
 
         <div>

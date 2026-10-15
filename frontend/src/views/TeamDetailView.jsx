@@ -58,7 +58,7 @@ export default function TeamDetailView() {
             <Bookmark size={18} />
             <span>Team Links</span>
           </Link>
-          <Link to="/tasks" className="btn btn-primary" style={{ textDecoration: 'none' }}>
+          <Link to={`/tasks?team=${teamDetail.id}`} className="btn btn-primary" style={{ textDecoration: 'none' }}>
             <CheckSquare size={18} />
             <span>Tasks</span>
           </Link>

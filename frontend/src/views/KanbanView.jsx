@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useTeams } from '../hooks/useTeams';
 import { useTasks } from '../hooks/useTasks';
+import { teamsApi } from '../api/teamsApi';
 import TaskCard from '../components/tasks/TaskCard';
 import TaskModal from '../components/tasks/TaskModal';
 import Modal from '../components/common/Modal';
@@ -10,15 +12,29 @@ import { Plus, Users, Clock, CheckCircle2, Inbox, AlertTriangle } from 'lucide-r
 
 export default function KanbanView() {
   const { user } = useAuth();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const paramTeamId = searchParams.get('team') || location.state?.teamId;
+
   const { teams, loading: teamsLoading } = useTeams();
-  const [selectedTeamId, setSelectedTeamId] = useState(null);
+  const [selectedTeamId, setSelectedTeamId] = useState(() => (paramTeamId ? Number(paramTeamId) : null));
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [membersLoading, setMembersLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [taskToEdit, setTaskToEdit] = useState(null);
   const [taskToDelete, setTaskToDelete] = useState(null);
 
   useEffect(() => {
-    if (teams.length > 0 && !selectedTeamId) setSelectedTeamId(teams[0].id);
-  }, [teams, selectedTeamId]);
+    if (teams.length > 0) {
+      if (!selectedTeamId || !teams.some((t) => t.id === Number(selectedTeamId))) {
+        if (paramTeamId && teams.some((t) => t.id === Number(paramTeamId))) {
+          setSelectedTeamId(Number(paramTeamId));
+        } else {
+          setSelectedTeamId(teams[0].id);
+        }
+      }
+    }
+  }, [teams, selectedTeamId, paramTeamId]);
 
   const {
     tasks, allTasks, loading: tasksLoading, error,
@@ -26,7 +42,7 @@ export default function KanbanView() {
   } = useTasks(selectedTeamId);
 
   const currentTeam = teams.find((t) => t.id === Number(selectedTeamId));
-  const isLeader = currentTeam?.my_role === 'lead';
+  const isLeader = currentTeam?.my_role === 'lead' || currentTeam?.lead_id === user?.id;
 
   const inProgressCount = allTasks.filter((t) => t.status === 'in_progress').length;
   const doneCount = allTasks.filter((t) => t.status === 'done').length;
@@ -37,15 +53,59 @@ export default function KanbanView() {
     { key: 'done', label: `Completed (${doneCount})`, icon: CheckCircle2 },
   ];
 
-  const teamMembers = currentTeam
-    ? JSON.parse(localStorage.getItem('linkhub_team_memberships') || '[]')
-        .filter((m) => m.team_id === currentTeam.id)
+  const fetchSquadMembers = useCallback(async (teamId) => {
+    if (!teamId) {
+      setTeamMembers([]);
+      return;
+    }
+    setMembersLoading(true);
+    try {
+      const detail = await teamsApi.getTeam(teamId, user?.id);
+      if (detail && Array.isArray(detail.members) && detail.members.length > 0) {
+        setTeamMembers(detail.members);
+      } else {
+        // If members array is empty, include at least the team leader / current user
+        const fallbackMember = currentTeam?.lead_name
+          ? [{ user_id: currentTeam.lead_id, name: currentTeam.lead_name, role: 'lead' }]
+          : (user ? [{ user_id: user.id, name: user.full_name, role: 'lead' }] : []);
+        setTeamMembers(fallbackMember);
+      }
+    } catch (err) {
+      console.error('Failed to load squad members:', err);
+      const localMembers = JSON.parse(localStorage.getItem('linkhub_team_memberships') || '[]')
+        .filter((m) => m.team_id === Number(teamId))
         .map((m) => ({
           user_id: m.user_id,
           name: JSON.parse(localStorage.getItem('linkhub_users') || '[]').find((x) => x.id === m.user_id)?.full_name || 'Member',
           role: m.role,
-        }))
-    : [];
+        }));
+      setTeamMembers(localMembers);
+    } finally {
+      setMembersLoading(false);
+    }
+  }, [user?.id, user?.full_name, currentTeam?.lead_id, currentTeam?.lead_name]);
+
+  useEffect(() => {
+    if (selectedTeamId) {
+      fetchSquadMembers(selectedTeamId);
+    } else {
+      setTeamMembers([]);
+    }
+  }, [selectedTeamId, fetchSquadMembers]);
+
+  const handleOpenAssignModal = () => {
+    if (selectedTeamId) {
+      fetchSquadMembers(selectedTeamId);
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (task) => {
+    if (selectedTeamId) {
+      fetchSquadMembers(selectedTeamId);
+    }
+    setTaskToEdit(task);
+  };
 
   const handleConfirmDelete = async () => {
     if (taskToDelete) {
@@ -80,7 +140,7 @@ export default function KanbanView() {
           )}
 
           {isLeader && (
-            <Button variant="primary" onClick={() => setIsModalOpen(true)} icon={Plus}>
+            <Button variant="primary" onClick={handleOpenAssignModal} icon={Plus}>
               Assign Task
             </Button>
           )}
@@ -140,7 +200,7 @@ export default function KanbanView() {
               currentUserId={user?.id}
               onUpdateStatus={updateStatus}
               onUpdateProgress={updateProgress}
-              onEdit={(t) => setTaskToEdit(t)}
+              onEdit={handleOpenEditModal}
               onDelete={(t) => setTaskToDelete(t)}
             />
           ))}
